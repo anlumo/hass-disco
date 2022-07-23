@@ -1,48 +1,64 @@
-use hass_rs::client;
-use lazy_static::lazy_static;
+use clap::Parser;
+use hass_rs::{client, HassError};
 use rand::Rng;
 use serde_json::json;
-use std::env::var;
-use tokio::sync::mpsc::{error::TryRecvError, unbounded_channel};
+use std::time::Duration;
+use tokio::{
+    sync::mpsc::{error::TryRecvError, unbounded_channel},
+    time::sleep,
+};
 
-// eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJkYzQwZjA4NjM0ZjA0NzM1YTY1Y2U2ZTZlYzZlY2JkOCIsImlhdCI6MTY1ODQzNTUxNywiZXhwIjoxOTczNzk1NTE3fQ.Sl9E9yJ_SO5U18VFRmy9clDi5ZF5boYwLvrapBQaF3A
+mod config;
 
-lazy_static! {
-    static ref TOKEN: String =
-        var("HASS_TOKEN").expect("please set up the HASS_TOKEN env variable before running this");
+#[derive(Parser)]
+#[clap(author, version, about, long_about = None)]
+struct DiscoFlags {
+    #[clap(long, short, default_value = "disco.toml")]
+    config: std::path::PathBuf,
 }
-
-const ENTITY: [&str; 9] = [
-    "light.ewelight_zb_cl01_5310eb55_level_light_color_on_off",
-    "light.ewelight_zb_cl01_65300f48_level_light_color_on_off",
-    "light.ewelight_zb_cl01_69b00195_level_light_color_on_off",
-    "light.ewelight_zb_cl01_7208c93f_level_light_color_on_off",
-    "light.ewelight_zb_cl01_aedd6700_level_light_color_on_off",
-    "light.ewelight_zb_cl01_b1a72bb7_level_light_color_on_off",
-    "light.ewelight_zb_cl01_d4a83ca6_level_light_color_on_off",
-    "light.ewelight_zb_cl01_e0977c73_level_light_color_on_off",
-    "light.ewelight_zb_cl01_ec570fed_level_light_color_on_off",
-];
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     let mut rng = rand::thread_rng();
+    let cmdline = DiscoFlags::parse();
 
-    log::info!("Creating the Websocket Client and Authenticate the session");
-    let mut client = client::connect("151.217.102.206", 8123, false).await?;
+    let config = config::get_config(&cmdline.config)?;
 
-    client.auth_with_longlivedtoken(&*TOKEN).await?;
-    log::info!("WebSocket connection and authenthication works");
+    log::info!(
+        "Connecting to {} port {}",
+        config.server.host,
+        config.server.port.unwrap_or(8123)
+    );
+    let mut client = loop {
+        match client::connect(
+            &config.server.host,
+            config.server.port.unwrap_or(8123),
+            config.server.tls.unwrap_or(false),
+        )
+        .await
+        {
+            Ok(client) => break client,
+            Err(HassError::CantConnectToGateway) => {
+                log::warn!("Failed to connect, trying again in 3 seconds...");
+                sleep(Duration::from_secs(3)).await;
+            }
+            Err(err) => return Err(err.into()),
+        }
+    };
 
-    log::debug!("Get Hass Config");
+    client
+        .auth_with_longlivedtoken(&config.server.hass_token)
+        .await?;
+    log::debug!("WebSocket connection and authenthication works");
 
     let (sender, mut receiver) = unbounded_channel::<bool>();
 
+    let input = config.entities.input;
     client
         .subscribe_event("state_changed", move |ws_event| {
             let data = ws_event.event.data;
-            if data.entity_id == "input_boolean.disco" {
+            if data.entity_id == input {
                 if let Some(state) = data.new_state {
                     sender.send(&state.state == "on").unwrap();
                 }
@@ -50,11 +66,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .await?;
 
+    let entities = config.entities.disco;
+
     loop {
         let state = receiver.recv().await;
         if Some(true) == state {
             loop {
-                let idx = rng.gen_range(0..ENTITY.len());
+                let idx = rng.gen_range(0..entities.len());
                 let angle = rng.gen_range(0..360);
                 log::debug!("Setting light {idx} to angle {angle}");
 
@@ -63,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "light".to_owned(),
                         "turn_on".to_owned(),
                         Some(json!({
-                            "entity_id": ENTITY[idx],
+                            "entity_id": entities[idx],
                             "hs_color": [angle, 100],
                         })),
                     )
@@ -82,6 +100,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if Ok(false) == receiver.try_recv() {
                     break;
                 }
+            }
+            for entity in &entities {
+                log::debug!("Turn off {entity}");
+                client
+                    .call_service(
+                        "light".to_owned(),
+                        "turn_off".to_owned(),
+                        Some(json!({
+                            "entity_id": entity,
+                        })),
+                    )
+                    .await?;
             }
         }
     }

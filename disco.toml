@@ -1,0 +1,18 @@
+[server]
+host = "151.217.102.206"
+port = 8123
+hass_token = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJkYzQwZjA4NjM0ZjA0NzM1YTY1Y2U2ZTZlYzZlY2JkOCIsImlhdCI6MTY1ODQzNTUxNywiZXhwIjoxOTczNzk1NTE3fQ.Sl9E9yJ_SO5U18VFRmy9clDi5ZF5boYwLvrapBQaF3A"
+
+[entities]
+input = "input_boolean.disco"
+disco = [
+    "light.ewelight_zb_cl01_5310eb55_level_light_color_on_off",
+    "light.ewelight_zb_cl01_65300f48_level_light_color_on_off",
+    "light.ewelight_zb_cl01_69b00195_level_light_color_on_off",
+    "light.ewelight_zb_cl01_7208c93f_level_light_color_on_off",
+    "light.ewelight_zb_cl01_aedd6700_level_light_color_on_off",
+    "light.ewelight_zb_cl01_b1a72bb7_level_light_color_on_off",
+    "light.ewelight_zb_cl01_d4a83ca6_level_light_color_on_off",
+    "light.ewelight_zb_cl01_e0977c73_level_light_color_on_off",
+    "light.ewelight_zb_cl01_ec570fed_level_light_color_on_off",
+]
